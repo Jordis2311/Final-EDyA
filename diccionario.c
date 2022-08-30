@@ -3,6 +3,7 @@
 #include <math.h>
 #include <assert.h>
 #include <string.h>
+#include <ctype.h>
 
 typedef struct _SNodo {
   char* palabra;
@@ -123,15 +124,13 @@ void mostrarlista(SList lista){
 }
 
 void mostrar_tablahash(TablaHash tabla){
-  int cnp = 0;
   for(int idx = 0; idx < tabla->capacidad; idx++){
     if(tabla->elementos[idx] != NULL){
-      //printf("%i ",idx);
-      //mostrarlista(tabla->elementos[idx]);
+      printf("%i ",idx);
+      mostrarlista(tabla->elementos[idx]);
     }
-    else cnp++;
   }
-  printf("libres %i totales %i\n",cnp,tabla->capacidad);
+
 }
 
 TablaHash crear_diccionario(){
@@ -166,15 +165,145 @@ int en_el_diccionario(TablaHash tabla,char* palabra){
   return bandera;
 }
 
-int incluido(char* palabra,char caracter){
-  int bandera = 0;
-  for(int i = 0;i < strlen(palabra);i++){
-    if(palabra[i] == caracter) bandera = 1;
+void insertar_caracter(char* palabra,char caracter,int largo,int posicion){
+  for(int i = largo;i >= posicion;i--){
+    palabra[i+1] = palabra[i];
+  }
+  palabra[posicion] = caracter;
+}
+
+void eliminar_caracter(char* palabra,int largo,int posicion){
+  for(int i = posicion;i<largo;i++){
+    palabra[i] = palabra[i+1];
+  }
+}
+
+int no_en_lista(SList lista,char* palabra){
+  int bandera = 1;
+  for(SList temp = lista;temp != NULL;temp = temp->sig){
+    if(strcmp(temp->palabra,palabra) == 0)
+      bandera = 0;
   }
   return bandera;
 }
 
-void protocolo_error(TablaHash errores,char* palabra,int linea){
+SList slist_agregar(SList lista,char* palabra){
+  SList temp = slist_crear();
+  temp = malloc(sizeof(SNodo));
+  temp->palabra = strdup(palabra);
+  temp->sig = lista;
+  
+  return temp;
+}
+
+
+void buscar_a_distancia(TablaHash diccionario, char* palabra,int* sugeridas,int distancia,SList lista){
+
+  int sug = *sugeridas;
+  int largo = strlen(palabra);
+  char mod[largo + 3],c;
+  strcpy(mod,palabra);
+
+  for(int i = 0;(i <= largo)  && (sug < 5);i++){
+    //metodo 1: intercambiar caracteres
+    if(i < largo - 1){
+      c = mod[i];
+      mod[i] = mod[i + 1];
+      mod[i + 1] = c;
+
+      if(distancia == 0){
+        if(en_el_diccionario(diccionario,mod) && no_en_lista(lista,mod)){
+          lista = slist_agregar(lista,mod);
+          sug++;
+        }
+      }
+      else
+        buscar_a_distancia(diccionario,mod,&sug,distancia - 1,lista);
+
+      mod[i+1] = mod[i];
+      mod[i] = c;
+    }
+    
+    //metodo 2: agregar caracteres
+    for(int b = 97;(b < 123) && (sug < 5);b++){
+      c = (char) b;
+      insertar_caracter(mod,c,largo,i);
+
+      if(distancia == 0){
+        if(en_el_diccionario(diccionario,mod) && no_en_lista(lista,mod)){
+          lista = slist_agregar(lista,mod);
+          sug++;
+        }
+      }
+      else
+        buscar_a_distancia(diccionario,mod,&sug,distancia - 1,lista);
+
+      eliminar_caracter(mod,largo+1,i);
+    }
+
+    //Metodo 3: eliminar caracter
+    if(i < largo){
+      c = mod[i];
+      eliminar_caracter(mod,largo,i);
+
+      if(distancia == 0){
+        if(en_el_diccionario(diccionario,mod) && no_en_lista(lista,mod)){
+          lista = slist_agregar(lista,mod);
+          sug++;
+        }
+      }
+      else
+        buscar_a_distancia(diccionario,mod,&sug,distancia - 1,lista);
+
+      insertar_caracter(mod,c,largo-1,i);
+
+    //Metodo 4: cambiar caracter por otro
+      for(int b = 97;(b < 123) && (sug < 5);b++){
+        c = mod[i];
+        mod[i] = (char) b;
+        
+        if(distancia == 0){
+          if(en_el_diccionario(diccionario,mod) && no_en_lista(lista,mod)){
+            lista = slist_agregar(lista,mod);
+            sug++;
+          }
+        }
+        else
+          buscar_a_distancia(diccionario,mod,&sug,distancia - 1,lista);
+
+      mod[i] = c;
+      }
+    }
+  }
+
+  mostrarlista(lista);
+
+  *sugeridas = sug;
+}
+
+int isEmpty(SList lista){
+  return lista == NULL;
+}
+
+void sugerir_palabras(TablaHash diccionario, char* palabra){
+  int sugeridas = 0;
+
+  SList sugerencias = slist_crear();
+
+  printf("Distancia 1: ");
+  buscar_a_distancia(diccionario,palabra,&sugeridas,0,sugerencias);
+
+  mostrarlista(sugerencias);
+  puts("");
+
+  printf("Distancia 2: ");
+  buscar_a_distancia(diccionario,palabra,&sugeridas,1,sugerencias);
+  puts("");
+
+
+}
+
+void protocolo_error(TablaHash errores,TablaHash diccionario,char* palabra,int linea){
   if(en_el_diccionario(errores,palabra) == 0){
     //Si la tabla se esta llenando duplicaremos su espacio
     if((1.5*errores->ocupados) > errores->capacidad){
@@ -182,12 +311,14 @@ void protocolo_error(TablaHash errores,char* palabra,int linea){
     }
     tablahash_insertar(errores,palabra);
     printf("Linea: %i | %s | No se ha encontrado en el diccionario\n",linea,palabra);
+    printf("Quizas quizo decir: ");
+    sugerir_palabras(diccionario,palabra);
   }
 }
 
 void corrector(TablaHash diccionario){
   FILE  *texto = fopen("texto.txt","r+");
-  TablaHash errores = crear_diccionario();
+  TablaHash errores = tablahash_crear(10);
 
   int MAX = 255, c = 0, linea = 1;
   char buffer[MAX];
@@ -200,7 +331,7 @@ void corrector(TablaHash diccionario){
         buffer[c] = '\0';
         if(c > 1)
           if(en_el_diccionario(diccionario,buffer) == 0)
-            printf("la palabra %s no se ha encontrado en el diccionario(1)\n",buffer);
+            protocolo_error(errores,diccionario,buffer,linea);
         c = 0;
         break;
       case '\n':
@@ -209,23 +340,26 @@ void corrector(TablaHash diccionario){
         else buffer[c] = '\0';
         if(c > 1)
           if(en_el_diccionario(diccionario,buffer) == 0)
-            printf("la palabra %s no se ha encontrado en el diccionario (2)\n",buffer);
+            protocolo_error(errores,diccionario,buffer,linea);
         c = 0;
         break;
       case ',': case '.': case ';': case ':': case '?': case '!':
         buffer[c] = '\0';
         if(c > 1)
           if(en_el_diccionario(diccionario,buffer) == 0)
-            printf("la palabra %s no se ha encontrado en el diccionario(1)\n",buffer);
+            protocolo_error(errores,diccionario,buffer,linea);
         c = 0;
         break;
       default:
-        buffer[c] = caracter;
+        buffer[c] = tolower(caracter);
         c++;
         break;
     }
   }
-  //falta la ultima palabra
+  buffer[c-1] = '\0';
+  if(c > 1)
+    if(en_el_diccionario(diccionario,buffer) == 0)
+      protocolo_error(errores,diccionario,buffer,linea);
 
   //mostrar_tablahash(errores);
   eliminar_tabla(errores);
@@ -234,9 +368,10 @@ void corrector(TablaHash diccionario){
 int main(){
 
   TablaHash diccionario = crear_diccionario();
+  //mostrar_tablahash(diccionario);
 
-  mostrar_tablahash(diccionario);
   corrector(diccionario);
+
 
   eliminar_tabla(diccionario);
   return 0;
